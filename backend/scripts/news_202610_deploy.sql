@@ -1,0 +1,242 @@
+-- 「小寻带你看新闻」生产部署 SQL（2026-10 批次，合并版）
+-- 执行库：zhizhang_map —— 全新部署只需执行这一个文件（5 张表 DDL + 4 条时间线 × 20 个 POI 数据）
+-- 注意：
+--   1. 需等待 DDL 执行完成后再重启后端（create_all 冲突惯例）
+--   2. 数据全部为 pending（待人工核定）+ verified=0：部署后在后台「新闻时间线」逐条
+--      核对坐标（高德拾取）→ 勾选"坐标已核实"→ 状态改"已核定"→ 时间线改"已审核"并上线
+--   3. 部分坐标已按高德官方 POI 预核定（verified=1）；偏远点位（文昌/额济纳/国家公园等）仍需人工核对
+--   4. 旧库增量场景（本地已有旧版 news 表）请勿执行本文件，按需执行 news_*_upgrade.sql
+-- 来源文件：news_202610_ddl.sql + news_202610_data.sql（修改后需重新 cat 合并）
+
+CREATE TABLE IF NOT EXISTS `news_timelines` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `code` VARCHAR(48) NOT NULL,
+  `name` VARCHAR(64) NOT NULL,
+  `description` TEXT NULL,
+  `color` VARCHAR(16) NULL,
+  `cover_url` TEXT NULL,
+  `medal_icon_url` TEXT NULL,
+  `batch` VARCHAR(16) NULL,
+  `sort_order` INT NOT NULL DEFAULT 0,
+  `audit_status` VARCHAR(16) NOT NULL DEFAULT 'pending',
+  `enabled` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_news_timelines_code` (`code`),
+  KEY `ix_news_timelines_batch` (`batch`),
+  KEY `ix_news_timelines_audit_status` (`audit_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `news_pois` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `timeline_id` INT NOT NULL,
+  `name` VARCHAR(200) NOT NULL,
+  `event_date` VARCHAR(16) NULL,
+  `event_text` TEXT NULL,
+  `fact_text` TEXT NULL,
+  `hint_text` TEXT NULL,
+  `link_url` TEXT NULL,
+  `link_source` VARCHAR(64) NULL,
+  `link_checked_at` DATETIME NULL,
+  `lng` DOUBLE NOT NULL,
+  `lat` DOUBLE NOT NULL,
+  `region` VARCHAR(100) NULL,
+  `difficulty` SMALLINT NOT NULL DEFAULT 3,
+  `cover_url` TEXT NULL,
+  `sort_order` INT NOT NULL DEFAULT 0,
+  `verified` TINYINT(1) NOT NULL DEFAULT 0,
+  `status` VARCHAR(16) NOT NULL DEFAULT 'pending',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_news_pois_timeline_sort` (`timeline_id`, `sort_order`),
+  KEY `ix_news_pois_timeline_id` (`timeline_id`),
+  KEY `ix_news_pois_status` (`status`),
+  KEY `ix_news_pois_verified` (`verified`),
+  CONSTRAINT `fk_news_pois_timeline` FOREIGN KEY (`timeline_id`) REFERENCES `news_timelines` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `news_progress` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `session_id` VARCHAR(64) NOT NULL,
+  `mode` VARCHAR(8) NOT NULL DEFAULT 'easy',
+  `user_id` INT NULL,
+  `timeline_id` INT NOT NULL,
+  `poi_id` INT NOT NULL,
+  `found_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `found_lng` DOUBLE NULL,
+  `found_lat` DOUBLE NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_news_progress_session_mode_poi` (`session_id`, `mode`, `poi_id`),
+  KEY `ix_news_progress_timeline_id` (`timeline_id`),
+  KEY `ix_news_progress_user_id` (`user_id`),
+  CONSTRAINT `fk_news_progress_timeline` FOREIGN KEY (`timeline_id`) REFERENCES `news_timelines` (`id`),
+  CONSTRAINT `fk_news_progress_poi` FOREIGN KEY (`poi_id`) REFERENCES `news_pois` (`id`),
+  CONSTRAINT `fk_news_progress_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 新闻勋章获得记录（找齐发勋章，一人一线一模式一枚；旧环境增量见 news_medal_upgrade.sql / news_mode_upgrade.sql）
+CREATE TABLE IF NOT EXISTS `news_medal_records` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `user_id` INT NOT NULL,
+  `timeline_id` INT NOT NULL,
+  `mode` VARCHAR(8) NOT NULL DEFAULT 'easy',
+  `earned_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_news_medal_user_timeline_mode` (`user_id`, `timeline_id`, `mode`),
+  KEY `ix_news_medal_records_user_id` (`user_id`),
+  KEY `ix_news_medal_records_timeline_id` (`timeline_id`),
+  CONSTRAINT `fk_news_medal_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
+  CONSTRAINT `fk_news_medal_timeline` FOREIGN KEY (`timeline_id`) REFERENCES `news_timelines` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 新闻事件纠错反馈（玩家提交，后台处理；旧环境增量见 news_corrections_upgrade.sql）
+CREATE TABLE IF NOT EXISTS `news_corrections` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `news_poi_id` INT NOT NULL,
+  `session_id` VARCHAR(64) NOT NULL,
+  `nickname` VARCHAR(50) NULL,
+  `content` TEXT NOT NULL,
+  `contact` VARCHAR(100) NULL,
+  `status` VARCHAR(16) NOT NULL DEFAULT 'pending',
+  `reviewer_note` VARCHAR(256) NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `ix_news_corrections_poi` (`news_poi_id`),
+  KEY `ix_news_corrections_status` (`status`),
+  KEY `ix_news_corrections_session` (`session_id`),
+  CONSTRAINT `fk_news_corrections_poi` FOREIGN KEY (`news_poi_id`) REFERENCES `news_pois` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 「小寻带你看新闻」2026-10 批次数据（4 条时间线 × 20 个 POI）
+-- 执行库：zhizhang_map（需先执行 news_202610_ddl.sql）
+-- 状态：全部为 pending（待人工核定）+ verified=0（坐标未做高德逆地理核实）
+-- 核定流程：后台「新闻时间线」模块逐条核对坐标/文案 → status 改 approved、verified=1 → 时间线 audit_status 改 approved
+-- 注意：本文件为一次性数据初始化（纯 INSERT），重复执行会因唯一键冲突报错；
+--       已有数据时请勿重跑，如需重置先 TRUNCATE news_progress / news_pois / news_timelines
+-- 外链：link_url 留空，P2 阶段补充媒体报道链接
+
+-- ===== 时间线 =====
+-- 封面图（cover_url）为前端静态资源 /news/oct_t*.jpg，来源 Wikimedia Commons 自由授权图片，
+-- 作者与授权清单见 frontend/public/news/CREDITS.txt
+
+INSERT INTO `news_timelines` (`code`, `name`, `description`, `color`, `cover_url`, `batch`, `sort_order`, `audit_status`, `enabled`) VALUES
+('oct_t1', '十月·国庆万里行', '黄金周里的中国：维港烟花、国产大飞机、最北高铁与中网冠军，沿着时间线重走这个国庆。', '#dc2626', '/news/oct_t1.jpg', '2026-10', 1, 'pending', 1),
+('oct_t2', '十月·中国印记·科技与工程', '10 月的中国科技与工程大事记：一条海底隧道、一台核光钟与三场航天发射。', '#9333ea', '/news/oct_t2.jpg', '2026-10', 2, 'pending', 1),
+('oct_t3', '十月·中国主场', '国际交流与开放的中国：大师赛、戏剧节、广交会、金融街论坛在十月轮番登场。', '#2563eb', '/news/oct_t3.jpg', '2026-10', 3, 'pending', 1),
+('oct_t4', '十月·国家公园五周年', '2021 年 10 月 12 日首批 5 个国家公园同日设立，五周年之际看"美丽国土"的生态答卷。', '#16a34a', '/news/oct_t4.jpg', '2026-10', 4, 'pending', 1);
+
+-- ===== T1 十月·国庆万里行（4 点，按事件时间排序） =====
+
+INSERT INTO `news_pois` (`timeline_id`, `name`, `event_date`, `event_text`, `fact_text`, `hint_text`, `lng`, `lat`, `region`, `difficulty`, `sort_order`, `verified`, `status`) VALUES
+((SELECT `id` FROM `news_timelines` WHERE `code`='oct_t1'), '香港维多利亚港｜国庆烟花汇演', '2026-10-01',
+ '10 月 1 日晚 8 时，2026 香港国庆烟花汇演在维多利亚港上演，主题"永明烟花绽放中华"，庆祝新中国成立 77 周年。',
+ '3 艘趸船 + 6 艘小浮船组成 9 个发放点，在维港上空铺开宽约 900 米、高约 250 米的"烟花银幕"——世界少有的城市中心天然观景剧场。',
+ '在这座东方之珠，一条以女王之名命名的海峡，每年国庆夜都会被烟花点亮。',
+ 114.169, 22.290, '香港特别行政区', 2, 1, 0, 'pending'),
+((SELECT `id` FROM `news_timelines` WHERE `code`='oct_t1'), '青岛胶东国际机场｜C919 首次执飞青岛定期航班', '2026-10-01',
+ '10 月 1 日起，国产大飞机 C919 在南航青岛—广州航线上每天执行一个往返班次，系 C919 首次在青岛执行定期商业航班。',
+ '胶东机场航站楼呈"海星"形全向指廊，济青高铁在航站楼下设站；C919 今年 8 月已开启国际定期商业航线（北京—乌兰巴托）。',
+ '这座山东滨海城市有一座"海星"形机场，国庆起每天有一架国产大飞机从这里飞往广州。',
+ 120.093925, 36.360083, '山东省青岛市', 3, 2, 0, 'pending'),
+((SELECT `id` FROM `news_timelines` WHERE `code`='oct_t1'), '伊春西站｜最北高铁首个黄金周', '2026-10-05',
+ '9 月 28 日通车的我国最北高铁哈伊高铁，10 月迎来通车后首个国庆黄金周，哈尔滨至伊春由 7 小时缩短至约 2 小时。',
+ '哈伊高铁全长 318 公里、设计时速 250 公里，穿行小兴安岭林海、跨越高寒冻土带，是我国纬度最高的高铁。',
+ '这座被称为"祖国林都"的森林之城，国庆前刚接入全国高铁网——找找东北那片最绿的林海。',
+ 128.741819, 47.722836, '黑龙江省伊春市', 4, 3, 0, 'pending'),
+((SELECT `id` FROM `news_timelines` WHERE `code`='oct_t1'), '北京国家网球中心｜郑钦文首夺中网冠军', '2026-10-11',
+ '10 月 11 日晚，郑钦文直落两盘击败安德烈耶娃，夺得 2026 中网女单冠军——中网 20 届以来首位本土女单冠军，也是她个人首个 WTA1000 级冠军。',
+ '国家网球中心"钻石球场"可容纳约 1.5 万人，是亚洲规模最大的网球场馆之一。',
+ '北京城北奥林匹克公园旁有一座"钻石"球场，十月的这个夜晚属于中国网球。',
+ 116.377790, 40.012043, '北京市', 2, 4, 0, 'pending');
+
+-- ===== T2 十月·中国印记·科技与工程（5 点，按事件时间排序） =====
+
+INSERT INTO `news_pois` (`timeline_id`, `name`, `event_date`, `event_text`, `fact_text`, `hint_text`, `lng`, `lat`, `region`, `difficulty`, `sort_order`, `verified`, `status`) VALUES
+((SELECT `id` FROM `news_timelines` WHERE `code`='oct_t2'), '青岛胶州湾｜第二隧道完成盾构掘进', '2026-10-02',
+ '10 月 2 日，海平面下 105 米深处，"国信号"盾构机抵达预定位置，我国最长海底公路隧道——青岛胶州湾第二隧道盾构掘进全部完成。',
+ '工程全长 17.48 公里，连接青岛主城区与西海岸新区，最深处于海平面下约 115 米，建成后为世界最长海底公路隧道。',
+ '这座"帆船之都"的海湾下，一条比现有越湾隧道更深的新通道已经贯通。',
+ 120.25, 36.02, '山东省青岛市', 3, 1, 0, 'pending'),
+((SELECT `id` FROM `news_timelines` WHERE `code`='oct_t2'), '北京清华大学｜"核光钟"研制成功', '2026-10-08',
+ '清华大学联合国内团队在国际上率先研制出"核光钟"，将激光频率锁定至钍-229 核跃迁，成果 10 月 8 日发表于《自然》。',
+ '核光钟把"钟摆"从电子跃迁换成原子核跃迁，为新一代时间频率基准、深空探测开辟技术路径。',
+ '北京西北郊这座以"自强不息"为校训的园子里，科学家造出了一台用原子核"打拍子"的钟。',
+ 116.326936, 40.003213, '北京市', 4, 2, 0, 'pending'),
+((SELECT `id` FROM `news_timelines` WHERE `code`='oct_t2'), '海南文昌｜长征十二号发射低轨 27 组卫星', '2026-10-10',
+ '10 月 10 日凌晨 3 时 27 分，长征十二号在海南商业航天发射场成功将卫星互联网低轨 27 组卫星送入预定轨道。',
+ '海南商业航天发射场是我国首个商业航天发射场；文昌低纬度、临海的区位让火箭更省燃料、射向更宽。',
+ '海南岛东北角的这座"航天小镇"，凌晨的海滩上常能看见火箭尾焰划破夜空。',
+ 110.95, 19.61, '海南省文昌市', 2, 3, 0, 'pending'),
+((SELECT `id` FROM `news_timelines` WHERE `code`='oct_t2'), '内蒙古额济纳｜朱雀二号E"一箭十星"', '2026-10-14',
+ '10 月 14 日 19 时 40 分，蓝箭航天朱雀二号改进型遥四火箭在东风商业航天创新试验区点火升空，一箭十星发射成功，距上次发射仅 29 天。',
+ '朱雀二号是全球首款成功入轨的液氧甲烷火箭；东风商业航天创新试验区位于巴丹吉林沙漠边缘的戈壁滩上。',
+ '内蒙古最西端这片以胡杨林闻名的戈壁，民营火箭 29 天里完成了"两连发"。',
+ 100.29, 41.09, '内蒙古自治区阿拉善盟', 4, 4, 0, 'pending'),
+((SELECT `id` FROM `news_timelines` WHERE `code`='oct_t2'), '海南文昌｜长征五号运抵·嫦娥七号任务推进', '2026-10-14',
+ '长征五号遥十四火箭 10 月中旬运抵文昌航天发射场，将执行嫦娥七号任务——对月球南极环境与资源开展"绕、落、巡、飞跃"综合探测。',
+ '嫦娥七号将探测月球南极永久阴影坑（可能存有水冰），还携带一台"月面飞跃器"，能跳进坑底"探宝"。',
+ '还是那座海南航天之城，一枚"胖五"已就位，下一站是月球南极。',
+ 110.96, 19.60, '海南省文昌市', 3, 5, 0, 'pending');
+
+-- ===== T3 十月·中国主场（6 点，按事件时间排序） =====
+
+INSERT INTO `news_pois` (`timeline_id`, `name`, `event_date`, `event_text`, `fact_text`, `hint_text`, `lng`, `lat`, `region`, `difficulty`, `sort_order`, `verified`, `status`) VALUES
+((SELECT `id` FROM `news_timelines` WHERE `code`='oct_t3'), '杭州萧山国际机场｜直飞加德满都航线开通', '2026-10-02',
+ '10 月 2 日凌晨，杭州—加德满都直飞航线首航，杭州机场实现亚洲区域客运航线全覆盖。',
+ '这条航线飞越喜马拉雅山脉，从长三角直抵南亚腹地的"寺庙之城"尼泊尔加德满都。',
+ '这座以西湖闻名的城市，如今可以直飞喜马拉雅山那头的山谷都城。',
+ 120.432413, 30.234708, '浙江省杭州市', 3, 1, 0, 'pending'),
+((SELECT `id` FROM `news_timelines` WHERE `code`='oct_t3'), '上海旗忠网球中心｜上海劳力士大师赛', '2026-10-05',
+ '10 月 5 日至 18 日，2026 上海劳力士大师赛举行——亚太唯一 ATP1000 大师赛，14 天上演 162 场对决，世界前百选手悉数出席。',
+ '旗忠中央球场屋顶可像上海市花白玉兰一样"绽放"，8 片花瓣徐徐开启，是世界著名的开合式屋顶球场。',
+ '上海西南郊这座球场屋顶会像花一样打开，亚洲唯一的 ATP1000 大师赛每年十月在此开拍。',
+ 121.351074, 31.057494, '上海市', 2, 2, 0, 'pending'),
+((SELECT `id` FROM `news_timelines` WHERE `code`='oct_t3'), '浙江乌镇｜第十三届乌镇戏剧节', '2026-10-15',
+ '10 月 15 日晚，柏林邵宾纳剧院《野鸭》拉开第十三届乌镇戏剧节帷幕，主题"澹远"，11 个国家 26 部剧目上演 70 余场。',
+ '乌镇戏剧节走过十三年，从首届 6 部特邀剧目起步；水乡的石桥、晒场、粮仓都是舞台，茅盾故居就在这里。',
+ '江南水乡的这座千年古镇，每年十月变成"戏剧乌托邦"。',
+ 120.484263, 30.750270, '浙江省嘉兴市', 1, 3, 0, 'pending'),
+((SELECT `id` FROM `news_timelines` WHERE `code`='oct_t3'), '广州琶洲｜第 140 届广交会开幕', '2026-10-15',
+ '10 月 15 日，第 140 届广交会开幕，展览总面积约 155 万平方米，3 万多家企业参展，李强总理出席开幕式并作主旨演讲。',
+ '广交会创办于 1957 年，被誉为"中国第一展"；本届恰逢第 140 届，流花路旧展馆同步举办"广交世界 70 年"展。',
+ '珠江边的这座"花城"，每年两度迎来全球采购商——中国第一展的主场。',
+ 113.360903, 23.100952, '广东省广州市', 2, 4, 0, 'pending'),
+((SELECT `id` FROM `news_timelines` WHERE `code`='oct_t3'), '北京金融街｜2026 金融街论坛年会', '2026-10-19',
+ '10 月 19 日至 22 日，2026 金融街论坛年会在北京举办，主题"开放·合作·包容——共筑全球金融发展新生态"，40 多个国家和地区 400 余位嘉宾出席。',
+ '金融街汇集"一行一局一会"等金融管理部门，是观察中国金融政策的重要窗口。',
+ '北京西二环这条约 2.6 平方公里的街区，是中国金融政策的"新闻发生地"。',
+ 116.357325, 39.910142, '北京市', 2, 5, 0, 'pending'),
+((SELECT `id` FROM `news_timelines` WHERE `code`='oct_t3'), '北京亦庄｜2026 世界智能网联汽车大会', '2026-10-21',
+ '10 月 21 日至 23 日，2026 世界智能网联汽车大会在北京亦庄北人亦创国际会展中心举办，主题"汇智聚能 网联无限"，国际嘉宾占比近 50%。',
+ '北京亦庄是全国首个高级别自动驾驶示范区，"方向盘后无人"的 Robotaxi 在这里早已上路。',
+ '北京东南这处产业新城里自动驾驶出租车满街跑，全球车圈大佬十月都往这儿聚。',
+ 116.523770, 39.781071, '北京市', 3, 6, 0, 'pending');
+
+-- ===== T4 十月·国家公园五周年（5 点，周年线：按首批设立名单序，设立日均为 2021-10-12） =====
+
+INSERT INTO `news_pois` (`timeline_id`, `name`, `event_date`, `event_text`, `fact_text`, `hint_text`, `lng`, `lat`, `region`, `difficulty`, `sort_order`, `verified`, `status`) VALUES
+((SELECT `id` FROM `news_timelines` WHERE `code`='oct_t4'), '三江源国家公园', '2026-10-12',
+ '10 月 12-13 日首批国家公园设立五周年：三江源年均向下游输送优质水量 800 亿立方米，"中华水塔"水源涵养能力明显增强。',
+ '三江源是长江、黄河、澜沧江三条大河的源头；黄河源头玛多县曾湖泊干涸，如今"千湖竞秀"重现。',
+ '在青藏高原腹地找到"中华水塔"——三条大河从这里出发。',
+ 95.90, 33.80, '青海省玉树州', 5, 1, 0, 'pending'),
+((SELECT `id` FROM `news_timelines` WHERE `code`='oct_t4'), '大熊猫国家公园（卧龙片区）', '2026-10-12',
+ '设立五年来，大熊猫国家公园打通 13 个野生大熊猫局域种群生态廊道，栖息地连通性持续改善。',
+ '大熊猫国家公园横跨四川、陕西、甘肃三省；卧龙是全球第一只人工圈养大熊猫的诞生地。',
+ '四川盆地西缘的这条山脉是"滚滚"的老家——"卧龙"的名字就藏在这里。',
+ 102.95, 31.02, '四川省阿坝州', 3, 2, 0, 'pending'),
+((SELECT `id` FROM `news_timelines` WHERE `code`='oct_t4'), '东北虎豹国家公园（珲春）', '2026-10-12',
+ '设立五周年之际，东北虎、东北豹种群数量稳步增长（具体倍数入库前按国家林草局口径核实）。',
+ '这里是我国野生东北虎最重要的家园，公园横跨吉黑两省，与俄罗斯"豹地"国家公园接壤。',
+ '东北边陲的中俄边境线上，"山大王"的家族正在悄悄扩大。',
+ 130.55, 42.87, '吉林省延边州', 4, 3, 0, 'pending'),
+((SELECT `id` FROM `news_timelines` WHERE `code`='oct_t4'), '海南热带雨林国家公园（五指山片区）', '2026-10-12',
+ '五周年生态答卷：雨林生态系统的完整性与原真性持续提升，海南长臂猿种群稳步恢复（最新数字入库前核实）。',
+ '海南长臂猿是全球最稀有的灵长类之一；热带雨林"空中花园""绞杀榕"奇观在这里随处可见。',
+ '中国最南端的这座"翡翠山城"，雨林深处住着地球上最稀少的"歌者"。',
+ 109.62, 18.90, '海南省五指山市', 3, 4, 0, 'pending'),
+((SELECT `id` FROM `news_timelines` WHERE `code`='oct_t4'), '武夷山国家公园', '2026-10-12',
+ '首批国家公园中唯一的世界文化与自然双遗产地，五周年交出生物多样性保护答卷。',
+ '武夷山被称为"蛇的王国""鸟的天堂"，是世界红茶发源地；大红袍母树就长在九龙窠崖壁上。',
+ '闽赣交界处的这座名山，丹霞碧水与千年茶香共存。',
+ 117.85, 27.72, '福建省南平市', 2, 5, 0, 'pending');

@@ -1,0 +1,37 @@
+{
+  "data": [
+    {
+      "id": "image-001",
+      "title": "地图寻踪 Logo - 指南针吉祥物",
+      "type": "image",
+      "version": 1,
+      "createdAt": 1786307200000,
+      "devMetadata": {
+        "imageSrc": "assets/map-seeker-logo-compass.jpg"
+      },
+      "canvasData": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "image-002",
+      "title": "地图寻踪 Logo - 狐狸探险家",
+      "type": "image",
+      "version": 1,
+      "createdAt": 1786307200000,
+      "devMetadata": {
+        "imageSrc": "assets/map-seeker-logo-fox.jpg"
+      },
+      "canvasData": {
+        "x": 1080,
+        "y": 0
+      }
+    }
+  ],
+  "config": {
+    "autoLayout": true,
+    "deviceType": "freeSize",
+    "projectName": "地图寻踪 Logo"
+  }
+}

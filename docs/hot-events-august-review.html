@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>8月热点专题素材审阅 · 图寻足迹</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f6fa; color: #1f2937; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px 16px 60px; }
+  header h1 { font-size: 26px; margin-bottom: 6px; }
+  header p.meta { color: #6b7280; font-size: 13px; line-height: 1.6; }
+  .toolbar { margin: 16px 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .toolbar button { padding: 8px 16px; border: none; border-radius: 8px; background: #1f2937; color: #fff; cursor: pointer; font-size: 14px; }
+  .toolbar button:hover { background: #374151; }
+  #overviewMap { height: 480px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+  .legend { display: flex; gap: 16px; margin-top: 10px; font-size: 13px; flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  section.collection { margin-top: 40px; }
+  .cover { position: relative; border-radius: 14px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,.12); }
+  .cover img { width: 100%; height: 240px; object-fit: cover; display: block; }
+  .cover .cover-info { position: absolute; inset: 0; background: linear-gradient(180deg, transparent 30%, rgba(0,0,0,.75)); color: #fff; padding: 20px; display: flex; flex-direction: column; justify-content: flex-end; }
+  .cover .cover-info h2 { font-size: 22px; }
+  .cover .cover-info p { font-size: 13px; opacity: .9; margin-top: 4px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 18px; margin-top: 18px; }
+  .card { background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,.07); display: flex; flex-direction: column; }
+  .card img.poi-img { width: 100%; height: 170px; object-fit: cover; display: block; background: #e5e7eb; }
+  .card .body { padding: 14px 16px 16px; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+  .card h3 { font-size: 17px; }
+  .card .tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px; color: #fff; align-self: flex-start; }
+  .card .event { font-size: 13px; color: #374151; line-height: 1.6; }
+  .card .summary { font-size: 13px; color: #6b7280; line-height: 1.6; }
+  .card .hint { font-size: 12px; color: #92400e; background: #fef3c7; border-radius: 8px; padding: 8px 10px; line-height: 1.5; }
+  .card .meta { font-size: 12px; color: #9ca3af; display: flex; justify-content: space-between; align-items: center; margin-top: auto; }
+  .card .meta a { color: #2563eb; text-decoration: none; }
+  .spoiler-hidden .answer { filter: blur(6px); cursor: pointer; user-select: none; }
+  footer { margin-top: 50px; color: #9ca3af; font-size: 12px; line-height: 1.8; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>8 月热点专题素材审阅</h1>
+    <p class="meta">
+      素材来源：2026 年 8 月公开新闻（新华社 / 澎湃新闻 / 中央气象台 / 央视网 / 人民网 等）· 生成日期 2026-08-30<br/>
+      说明：坐标为快速估算，入库前需用高德逆地理核实；事件图为 AI 生成示意图（异步生成，需等待数分钟，正式上线需另配实景图）；hint 文案已避免剧透地名（谜底仅审阅用）。
+    </p>
+  </header>
+  <div class="toolbar">
+    <button id="toggleSpoiler">隐藏谜底</button>
+    <span style="font-size:13px;color:#6b7280">点击按钮切换；隐藏时可检查提示文案是否会剧透</span>
+  </div>
+  <div id="overviewMap"></div>
+  <div class="legend">
+    <span><i class="dot" style="background:#e63946"></i>台风月：三登坎门</span>
+    <span><i class="dot" style="background:#2563eb"></i>八月·山河驰援</span>
+    <span><i class="dot" style="background:#9333ea"></i>中国印记·科技与工程</span>
+    <span><i class="dot" style="background:#f59e0b"></i>中国印记·文化与经济</span>
+  </div>
+
+  <div id="collections"></div>
+
+  <footer>
+    审阅要点：① 事件与地点是否准确 ② 文案口径（尤其灾害类）是否符合预期 ③ 点位数量与难度 ④ 专题拆分是否合理。
+    确认后我再按此清单生成入库 SQL（collections + pois + collection_pois）。
+  </footer>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const COLLECTIONS = [
+  {
+    code: 'aug_typhoon',
+    name: '台风月：三登坎门',
+    desc: '2026 年夏，"巴威""白海豚""沙德尔"三个台风 50 天内三度登陆浙江玉环坎门街道，为气象观测史上首次。本专题沿台风足迹走访浙南沿海。',
+    color: '#e63946',
+    coverPrompt: 'Dramatic aerial photograph of dark typhoon storm clouds approaching a Chinese coastal fishing town, huge waves crashing against the seawall, fishing boats moored in harbor, moody cinematic realism, photojournalism',
+    pois: [
+      {
+        name: '坎门街道（浙江台州玉环市）', lng: 121.19, lat: 28.08, diff: 3,
+        event: '台风"沙德尔"于 8 月 28 日 8 时 05 分在此登陆（12 级）；此前"巴威"（7/11）与"白海豚"（8/9）也在此登陆——50 天三登同一街道，历史首次。',
+        summary: '坎门三面环海、向东南伸入东海，地势开阔无遮蔽，西北行进的台风常在这里最先"触岸"；当地渔民两月内经历三次停航避风。',
+        hint: '这座东海之滨的渔港小镇，两个月里被三个"不速之客"接连造访，创造了中国气象观测史上从未有过的纪录。',
+        poiPrompt: 'Photorealistic view of Kanmen fishing port in Yuhuan Zhejiang China, dense fishing boats moored in harbor under dark typhoon sky, coastal town hillside with houses, documentary photography'
+      },
+      {
+        name: '温州龙湾沿海（浙江温州市）', lng: 120.79, lat: 27.91, diff: 3,
+        event: '台风"沙德尔"于 8 月 28 日 9 时 10 分在龙湾区沿海二次登陆（12 级），随后深入内陆。',
+        summary: '同一场台风在相邻两市两次登陆并不常见；龙湾地处瓯江入海口南岸，海岸线平直，是浙南重要的临港产业带。',
+        hint: '这座城市位于瓯江入海口，一场台风在离开邻市后，又在这里第二次踏上了陆地。',
+        poiPrompt: 'Photorealistic coastal industrial shoreline at Oujiang estuary Wenzhou China, storm clouds and rough sea, port cranes in distance, documentary photography'
+      },
+      {
+        name: '温州瑞安（浙江温州市）', lng: 120.65, lat: 27.78, diff: 4,
+        event: '8 月 28 日 10 时，"沙德尔"在瑞安境内减弱为强热带风暴级，随后西行深入内陆，风雨影响波及 9 省区。',
+        summary: '台风登陆并不代表结束——"沙德尔"残留云系此后一路向西，给江西、湖南、贵州、云南等地带去持续强降雨，影响范围远超登陆点。',
+        hint: '在这座浙南城市上空，一位远道而来的"客人"褪去了锋芒，但它的水汽旅程才刚刚走了一半。',
+        poiPrompt: 'Photorealistic rain-soaked small city skyline in Zhejiang China after typhoon landfall, wet streets, dark monsoon clouds, distant mountains, documentary photography'
+      },
+      {
+        name: '温岭石塘镇（浙江台州）', lng: 121.60, lat: 28.16, diff: 3,
+        event: '台风轮番来袭打乱渔汛：今年东海开渔一再推迟，石塘船老大整个 8 月仅出海七八天，近岸渔获锐减。',
+        summary: '石塘以石屋渔村闻名，被称为"画中镇"，也是新世纪祖国大陆第一缕曙光的首照地；频繁台风扰动近海盐度与鱼群洄游，是渔业看天吃饭的缩影。',
+        hint: '祖国大陆新千年的第一缕阳光照在这片石屋渔村上；今年夏天，渔民们却盼着风平浪静能多出几次海。',
+        poiPrompt: 'Photorealistic Shitang fishing town Wenling China, stone houses on hillside by the sea, colorful fishing boats in harbor, morning light, travel photography'
+      }
+    ]
+  },
+  {
+    code: 'aug_rescue',
+    name: '八月·山河驰援',
+    desc: '8 月末，中尼、中老边境接连遭遇泥石流与洪涝。本专题记录救援一线与地理要冲，致敬逆行者。（文案以救援进展与地理科普为主）',
+    color: '#2563eb',
+    coverPrompt: 'Realistic photojournalism of Chinese rescue helicopters and orange engineering vehicles working on a mountain highway in the Tibetan plateau, dramatic clouds, hopeful atmosphere',
+    pois: [
+      {
+        name: '吉隆口岸（西藏日喀则吉隆县）', lng: 85.32, lat: 29.13, diff: 5,
+        event: '8 月 27 日起吉隆县遭遇严重泥石流灾害，各路救援力量向口岸核心区挺进；中方专家还从此出境驰援尼泊尔灾区。',
+        summary: '吉隆藏语意为"舒适村、快乐村"，吉隆沟是喜马拉雅山脉中罕见的南北向峡谷通道，自古是吐尼古道要冲，如今是中尼之间的重要陆路口岸。',
+        hint: '在喜马拉雅深处的峡谷里，藏着一条千年古道；如今它是雪域高原通向南亚邻国的重要门户。',
+        poiPrompt: 'Photorealistic Gyirong valley port in Tibet China, deep Himalayan gorge with winding road, border buildings, dramatic clouds, documentary photography'
+      },
+      {
+        name: 'G216 国道抢通段（西藏吉隆县境内）', lng: 85.30, lat: 29.00, diff: 5,
+        event: '泥石流冲毁 G216 国道，中国安能投入 60 名骨干、14 台套装备连续抢通，8 月 29 日已抢通约 2.6 公里。',
+        summary: 'G216 国道纵贯新疆与西藏，是西部边疆大动脉；高原峡谷地带道路损毁后的抢通速度，直接决定救援与物资进出的效率。',
+        hint: '一条纵贯西北与西南边疆的公路大动脉，在这里被大自然掐断，又被工程铁军一段段接了回来。',
+        poiPrompt: 'Photorealistic mountain highway construction site on Tibetan plateau, excavators and dump trucks repairing washed-out road section, rescue workers in orange vests, dramatic sky'
+      },
+      {
+        name: '磨憨镇（云南西双版纳勐腊县）', lng: 101.75, lat: 21.19, diff: 4,
+        event: '8 月 28-29 日磨憨镇 24 小时最大降雨 187.5 毫米引发洪涝，2226 名受灾群众紧急转移，省级响应升至三级。',
+        summary: '磨憨是中国最南端的边境小镇之一，与老挝磨丁口岸相接，是中老铁路出境前的最后一站，也是昆明的"飞地"——由昆明托管。',
+        hint: '这座云南边陲小镇由千里之外的省会"托管"，中老铁路的列车从这里驶出国门。',
+        poiPrompt: 'Photorealistic Mohan border town in Yunnan China, lush tropical mountains, border gate and railway station buildings, after heavy rain, documentary photography'
+      },
+      {
+        name: '拉萨（西藏）', lng: 91.14, lat: 29.65, diff: 2,
+        event: '拉萨消防救援机动支队 15 人陆地搜寻队伍从驻地出发，持续在吉隆口岸受灾核心区执行搜索救援任务。',
+        summary: '从拉萨到吉隆约 700 公里高原路，救援力量连夜机动；高原搜救对体能、装备与协同都是极限考验。',
+        hint: '这座海拔 3650 米的日光之城，是雪域高原救援出发的大本营，圣殿的金顶是它最著名的名片。',
+        poiPrompt: 'Photorealistic Lhasa cityscape with Potala Palace in golden morning light, Tibetan plateau mountains behind, clear sky, travel photography'
+      }
+    ]
+  },
+  {
+    code: 'aug_tech',
+    name: '八月·中国印记·科技与工程',
+    desc: '8 月的中国科技与工程大事记：从 40 万公里外的激光握手，到大国重器与开放平台。',
+    color: '#9333ea',
+    coverPrompt: 'Realistic photo montage style of China technology achievements, rocket launch tower, satellite communication ground station dish, modern data center, city skyline at dusk, cinematic',
+    pois: [
+      {
+        name: '北京航天飞行控制中心（北京）', lng: 116.30, lat: 39.98, diff: 3,
+        event: '8 月下旬，神舟二十三号乘组航天员朱杨柱完成舱外作业，飞控大厅大屏上记录下出舱全程。',
+        summary: '这里是中国载人航天的"神经中枢"：从神舟一号到空间站常态化运营，历次任务的天上指令都从这里发出。',
+        hint: '中国航天的"神经中枢"坐落在这座城市，每一次太空漫步背后，都是大厅里紧盯着大屏的一双双眼睛。',
+        poiPrompt: 'Photorealistic Beijing aerospace flight control center mission hall interior, giant screens showing earth and spacecraft, engineers at consoles, cinematic'
+      },
+      {
+        name: '地月激光通信地面站（北京，站址待核实）', lng: 116.90, lat: 40.40, diff: 4,
+        event: '我国首次在超 40 万公里地月距离上建立双向激光链路，实现地月双向高速激光通信。',
+        summary: '用激光代替微波传数据，带宽可提升数量级——这是未来探月工程与深空探测的"高速光纤"。地面站的巨型望远镜是关键节点。',
+        hint: '在这座城市的北郊，巨大的光学望远镜向 40 万公里外发出一束光，第一次与月球"双向视频通话"。',
+        poiPrompt: 'Photorealistic large optical telescope ground station at night in northern China mountains, laser beam pointing to the moon, starry sky, long exposure photography'
+      },
+      {
+        name: '贵阳（贵州）', lng: 106.63, lat: 26.65, diff: 2,
+        event: '8 月 28 日，2026 中国国际大数据产业博览会专业展览在贵阳开幕；国家数据局宣布再选 32 城开展数据标注试点。',
+        summary: '贵阳凭凉爽气候与稳定地质成为"中国数谷"，是全国数据中心的重要集聚地，数博会已在此连办多年。',
+        hint: '这座西南"凉都"夏天不开空调，却把全中国的数据都"焐热"了——大数据博览会是它的城市名片。',
+        poiPrompt: 'Photorealistic Guiyang city skyline in summer, green mountains surrounding modern buildings, big data expo venue, blue sky with clouds, travel photography'
+      },
+      {
+        name: '雄安新区（河北）', lng: 115.87, lat: 38.90, diff: 2,
+        event: '首批 4 所疏解高校（北交大、北科大、北林、地大）雄安校区 2027 年 9 月开学，开门办学进入一年倒计时。',
+        summary: '雄安是"千年大计"的新城，高校疏解是其教育布局的关键落子；164 栋办学建筑已完成 4 栋竣工、156 栋封顶。',
+        hint: '华北平原上崛起的"未来之城"，四所北京高校的数千名师生明年秋天将在这里翻开新课本。',
+        poiPrompt: 'Photorealistic Xiongan New Area China, modern university campus under construction with cranes, Baiyangdian lake and reeds nearby, blue sky, aerial photography'
+      },
+      {
+        name: '天津国际邮轮母港（天津滨海新区）', lng: 117.79, lat: 38.98, diff: 2,
+        event: '8 月 29 日，"理想号"邮轮载近 2700 名游客开启"无目的地海上游"，创天津邮轮母港单日旅客量新高。',
+        summary: '"无目的地海上游"是邮轮旅行的新形态：不靠泊他国港口，在海上巡游度假——邮轮本身即是目的地。',
+        hint: '渤海湾畔的这座母港迎来新玩法：船不靠岸，风景在海上，目的地就是邮轮本身。',
+        poiPrompt: 'Photorealistic large cruise ship departing Tianjin international cruise home port, modern terminal buildings, calm Bohai sea, sunny day, travel photography'
+      },
+      {
+        name: '徐大堡核电厂（辽宁葫芦岛兴城）', lng: 120.60, lat: 40.60, diff: 4,
+        event: '8 月 28 日，徐大堡核电厂 1 号机组核岛钢穹顶吊装就位，机组大型钢结构施工进入尾声。',
+        summary: '徐大堡是东北能源版图上的重要核电项目；核岛穹顶吊装是核电站建设的关键里程碑，标志主厂房封顶。',
+        hint: '辽东湾畔的这座海滨城市多了一张"国家级"名片：一座为东北供电的核电大工程在这里封顶。',
+        poiPrompt: 'Photorealistic nuclear power plant under construction on Liaoning coast China, containment dome being lifted by crane, sea in background, industrial photography'
+      }
+    ]
+  },
+  {
+    code: 'aug_culture',
+    name: '八月·中国印记·文化与经济',
+    desc: '8 月的中国人文与经济侧影：文学的夜晚、创业者的峰会、开海的渔港与首笔绿电交易。',
+    color: '#f59e0b',
+    coverPrompt: 'Realistic photograph of vibrant Chinese cultural event night stage with award ceremony lights, and a fishing port at dawn, warm cinematic tones',
+    pois: [
+      {
+        name: '上海', lng: 121.47, lat: 31.23, diff: 1,
+        event: '8 月 28 日晚，"2026 中国文学盛典·鲁迅文学奖之夜"在上海举行。',
+        summary: '鲁迅文学奖是中国文学最高奖项之一，以文学奖之夜的盛典形式颁奖，让文学走向大众舞台。',
+        hint: '在东方明珠所在的城市，中国文学界最高规格的盛典之夜刚刚落幕。',
+        poiPrompt: 'Photorealistic grand award ceremony stage at night in Shanghai, elegant lighting, Lujiazui skyline visible outside the venue, cinematic'
+      },
+      {
+        name: '北京顺义·中国国际展览中心', lng: 116.56, lat: 40.07, diff: 3,
+        event: '8 月 26-29 日，HICOOL 2026 全球创业者峰会举行：30 多个国家、600 多家高科创企、1000 多位投资人参会。',
+        summary: 'HICOOL 已连续举办七届，是北京面向全球创业者的一张名片；峰会落地的"创新源头到产业潮头"路径，是城市引才的样本。',
+        hint: '每年夏天，全球的创业者都往北京东北郊的这座展馆跑——这里办的不是车展，是"梦想博览会"。',
+        poiPrompt: 'Photorealistic startup expo hall in Beijing, crowds and futuristic exhibition booths, founders networking, bright modern venue, event photography'
+      },
+      {
+        name: '荣成（山东威海）', lng: 122.48, lat: 37.16, diff: 3,
+        event: '黄渤海伏季休渔即将结束，荣成各大渔港渔民检修渔船、整理网具、加冰加油，备战 9 月开海。',
+        summary: '荣成是中国渔业第一县，海带产量占全国近半；伏季休渔 4 个月后，"开海"是北方渔民最盛大的节日。',
+        hint: '这座山东最东端的滨海小城被称为"中国海带之乡"，每年九月开海，千帆竞发。',
+        poiPrompt: 'Photorealistic Rongcheng fishing port Shandong China, hundreds of fishing boats moored, fishermen preparing nets and gear, morning harbor scene, documentary photography'
+      },
+      {
+        name: '北京怀柔', lng: 116.68, lat: 40.32, diff: 3,
+        event: '8 月 29 日，2026 北京高端科学仪器与传感器大会在怀柔开幕，发布约 4 亿元采购"机遇清单"。',
+        summary: '怀柔科学城是北京建设国际科创中心的重要支点，聚集大科学装置集群；科学仪器是"卡脖子"清单上的关键一环。',
+        hint: '北京东北部的这座科学城里，大科学装置星罗棋布；一场关于"给科学家造工具"的大会在这里开幕。',
+        poiPrompt: 'Photorealistic Huairou Science City Beijing, modern research facilities and symposium hall, scientists walking, green campus, aerial photography'
+      },
+      {
+        name: '重庆', lng: 106.55, lat: 29.56, diff: 1,
+        event: '8 月 28 日，重庆首次开展小时级绿电交易：8 家电力用户与 2 家发电企业成交 2 千万千瓦时。',
+        summary: '小时级交易让绿电像"现货"一样按小时买卖，帮助企业应对出口碳关税；重庆是国网首批试点。',
+        hint: '这座 8D 魔幻山城最近玩起了"按小时卖电"的新生意，绿电交易精确到了小时。',
+        poiPrompt: 'Photorealistic Chongqing skyline at dusk, Hongya cave lights and Yangtze river, wind turbines and solar panels composite in distance, cinematic'
+      }
+    ]
+  }
+];
+
+// ===== POI 实景图（必应图片搜索 → 已上传生产 OSS，ugc-covers 前缀，仅内部审阅用）=====
+const PHOTOS = {
+  "坎门街道（浙江台州玉环市）": "https://map-find.oss-cn-beijing.aliyuncs.com/ugc-covers/1788061752_1352ff6e.jpg",
+  "温州龙湾沿海（浙江温州市）": "https://map-find.oss-cn-beijing.aliyuncs.com/ugc-covers/1788061753_211a3f98.jpg",
+  "温州瑞安（浙江温州市）": "https://map-find.oss-cn-beijing.aliyuncs.com/ugc-covers/1788061755_b883a7fa.jpg",
+  "温岭石塘镇（浙江台州）": "https://map-find.oss-cn-beijing.aliyuncs.com/ugc-covers/1788062811_248a037e.jpg",
+  "吉隆口岸（西藏日喀则吉隆县）": "https://map-find.oss-cn-beijing.aliyuncs.com/ugc-covers/1788062811_1366a589.jpg",
+  "G216 国道抢通段（西藏吉隆县境内）": "https://map-find.oss-cn-beijing.aliyuncs.com/ugc-covers/1788062812_c0cf16a7.jpg",
+  "磨憨镇（云南西双版纳勐腊县）": "https://map-find.oss-cn-beijing.aliyuncs.com/ugc-covers/1788061762_88304514.jpg",
+  "拉萨（西藏）": "https://map-find.oss-cn-beijing.aliyuncs.com/ugc-covers/1788061766_4d0207bc.jpg",
+  "北京航天飞行控制中心（北京）": "https://map-find.oss-cn-beijing.aliyuncs.com/ugc-covers/1788061770_e132728c.jpg",
+  "地月激光通信地面站（北京，站址待核实）": "https://map-find.oss-cn-beijing.aliyuncs.com/ugc-covers/1788061771_4d6f8f7b.jpg",
+  "贵阳（贵州）": "https://map-find.oss-cn-beijing.aliyuncs.com/ugc-covers/1788061772_16d2a9b3.jpg",
+  "雄安新区（河北）": "https://map-find.oss-cn-beijing.aliyuncs.com/ugc-covers/1788061774_8a13ae4d.jpg",
+  "天津国际邮轮母港（天津滨海新区）": "https://map-find.oss-cn-beijing.aliyuncs.com/ugc-covers/1788061776_4ff030fa.jpg",
+  "徐大堡核电厂（辽宁葫芦岛兴城）": "https://map-find.oss-cn-beijing.aliyuncs.com/ugc-covers/1788061778_48eeaaa3.jpg",
+  "上海": "https://map-find.oss-cn-beijing.aliyuncs.com/ugc-covers/1788061780_1053e13c.jpg",
+  "北京顺义·中国国际展览中心": "https://map-find.oss-cn-beijing.aliyuncs.com/ugc-covers/1788062812_20f95d72.jpg",
+  "荣成（山东威海）": "https://map-find.oss-cn-beijing.aliyuncs.com/ugc-covers/1788061784_d9bc5e7f.png",
+  "北京怀柔": "https://map-find.oss-cn-beijing.aliyuncs.com/ugc-covers/1788061787_4a91909a.jpg",
+  "重庆": "https://map-find.oss-cn-beijing.aliyuncs.com/ugc-covers/1788061803_f649fcc5.jpg"
+};
+
+// 渲染专题区块
+const wrap = document.getElementById('collections');
+COLLECTIONS.forEach(c => {
+  const sec = document.createElement('section');
+  sec.className = 'collection';
+  sec.innerHTML = `
+    <div class="cover" style="background: linear-gradient(135deg, ${c.color} 0%, #1f2937 100%)">
+      <div class="cover-info">
+        <h2>${c.name}</h2>
+        <p>${c.desc}</p>
+      </div>
+    </div>
+    <div class="cards"></div>`;
+  const cards = sec.querySelector('.cards');
+  c.pois.forEach(p => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <img class="poi-img" src="${PHOTOS[p.name] || ''}" alt="${p.name} 实景图" onerror="this.style.opacity=0.3" />
+      <div class="body">
+        <span class="tag" style="background:${c.color}">${c.name.split('·')[0].split('：')[0]}</span>
+        <h3 class="answer" title="点击查看/隐藏">${p.name}</h3>
+        <div class="event"><b>事件：</b>${p.event}</div>
+        <div class="summary"><b>地理冷知识：</b>${p.summary}</div>
+        <div class="hint"><b>提示文案（不剧透）：</b>${p.hint}</div>
+        <div class="meta">
+          <span>坐标 ${p.lng}, ${p.lat} · 建议难度 ${'★'.repeat(p.diff)}</span>
+          <a href="https://ditu.amap.com/?q=${p.lat},${p.lng}" target="_blank">高德查看 ↗</a>
+        </div>
+      </div>`;
+    card.querySelector('.answer').addEventListener('click', e => e.target.style.filter = e.target.style.filter ? '' : 'blur(6px)');
+    cards.appendChild(card);
+  });
+  wrap.appendChild(sec);
+});
+
+// 总览地图
+const map = L.map('overviewMap', { center: [33.5, 106.5], zoom: 4, zoomControl: true });
+L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+  subdomains: ['1', '2', '3', '4'], maxZoom: 18, attribution: '© 高德地图'
+}).addTo(map);
+// 图层控制（按专题勾选显隐）
+const overlays = {};
+COLLECTIONS.forEach(c => {
+  const g = L.featureGroup();
+  c.pois.forEach(p => L.circleMarker([p.lat, p.lng], {
+    radius: 8, color: '#fff', weight: 2, fillColor: c.color, fillOpacity: 0.95
+  }).bindPopup(`<b style="color:${c.color}">${c.name}</b><br/>${p.name}`).addTo(g));
+  g.addTo(map);
+  overlays[c.name] = g;
+});
+L.control.layers(null, overlays, { collapsed: false }).addTo(map);
+
+// 谜底显隐
+document.getElementById('toggleSpoiler').addEventListener('click', function () {
+  const hidden = document.body.classList.toggle('spoiler-hidden');
+  this.textContent = hidden ? '显示谜底' : '隐藏谜底';
+});
+
+
+
+
+</script>
+</body>
+</html>
